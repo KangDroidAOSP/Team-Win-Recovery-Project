@@ -52,6 +52,8 @@ extern "C" {
 
 #ifdef TW_INCLUDE_CRYPTO
 	#include "crypto/lollipop/cryptfs.h"
+#else
+	#define CRYPT_FOOTER_OFFSET 0x4000
 #endif
 }
 #ifdef HAVE_SELINUX
@@ -1051,6 +1053,20 @@ bool TWPartition::Mount(bool Display_Error) {
 		}
 	}
 
+	if (Current_File_System == "ntfs" && TWFunc::Path_Exists("/sbin/ntfs-3g")) {
+		string cmd;
+		if (Mount_Read_Only)
+			cmd = "/sbin/ntfs-3g -o ro " + Actual_Block_Device + " " + Mount_Point;
+		else
+			cmd = "/sbin/ntfs-3g " + Actual_Block_Device + " " + Mount_Point;
+		LOGINFO("cmd: '%s'\n", cmd.c_str());
+		if (TWFunc::Exec_Cmd(cmd) == 0) {
+			return true;
+		} else {
+			LOGINFO("ntfs-3g failed to mount, trying regular mount method.\n");
+		}
+	}
+
 	if (Mount_Read_Only)
 		flags |= MS_RDONLY;
 
@@ -1207,6 +1223,8 @@ bool TWPartition::Wipe(string New_File_System) {
 			wiped = Wipe_MTD();
 		else if (New_File_System == "f2fs")
 			wiped = Wipe_F2FS();
+		else if (New_File_System == "ntfs")
+			wiped = Wipe_NTFS();
 		else {
 			LOGERR("Unable to wipe '%s' -- unknown file system '%s'\n", Mount_Point.c_str(), New_File_System.c_str());
 			unlink("/.layout_version");
@@ -1275,6 +1293,8 @@ bool TWPartition::Can_Repair() {
 	else if (Current_File_System == "exfat" && TWFunc::Path_Exists("/sbin/fsck.exfat"))
 		return true;
 	else if (Current_File_System == "f2fs" && TWFunc::Path_Exists("/sbin/fsck.f2fs"))
+		return true;
+	else if (Current_File_System == "ntfs" && TWFunc::Path_Exists("/sbin/ntfsfix"))
 		return true;
 	return false;
 }
@@ -1349,6 +1369,25 @@ bool TWPartition::Repair() {
 		gui_print("Repairing %s using fsck.f2fs...\n", Display_Name.c_str());
 		Find_Actual_Block_Device();
 		command = "/sbin/fsck.f2fs " + Actual_Block_Device;
+		LOGINFO("Repair command: %s\n", command.c_str());
+		if (TWFunc::Exec_Cmd(command) == 0) {
+			gui_print("Done.\n");
+			return true;
+		} else {
+			LOGERR("Unable to repair '%s'.\n", Mount_Point.c_str());
+			return false;
+		}
+	}
+	if (Current_File_System == "ntfs") {
+		if (!TWFunc::Path_Exists("/sbin/ntfsfix")) {
+			gui_print("ntfsfix does not exist! Cannot repair!\n");
+			return false;
+		}
+		if (!UnMount(true))
+			return false;
+		gui_print("Repairing %s using ntfsfix...\n", Display_Name.c_str());
+		Find_Actual_Block_Device();
+		command = "/sbin/ntfsfix " + Actual_Block_Device;
 		LOGINFO("Repair command: %s\n", command.c_str());
 		if (TWFunc::Exec_Cmd(command) == 0) {
 			gui_print("Done.\n");
@@ -1573,6 +1612,46 @@ bool TWPartition::Wipe_Encryption() {
 	Is_Decrypted = false;
 	Is_Encrypted = false;
 	Find_Actual_Block_Device();
+	if (Crypto_Key_Location == "footer") {
+		int newlen, fd;
+		if (Length != 0) {
+			newlen = Length;
+			if (newlen < 0)
+				newlen = newlen * -1;
+		} else {
+			newlen = CRYPT_FOOTER_OFFSET;
+		}
+		if ((fd = open(Actual_Block_Device.c_str(), O_RDWR)) < 0) {
+			gui_print_color("warning", "Unable to open '%s' to wipe crypto key\n", Actual_Block_Device.c_str());
+		} else {
+			unsigned int block_count;
+			if ((ioctl(fd, BLKGETSIZE, &block_count)) == -1) {
+				gui_print_color("warning", "Unable to get block size for wiping crypto footer.\n");
+			} else {
+				off64_t offset = ((off64_t)block_count * 512) - newlen;
+				if (lseek64(fd, offset, SEEK_SET) == -1) {
+					gui_print_color("warning", "Unable to lseek64 for wiping crypto footer.\n");
+				} else {
+					void* buffer = malloc(newlen);
+					if (!buffer) {
+						gui_print_color("warning", "Failed to malloc for wiping crypto footer.\n");
+					} else {
+						memset(buffer, 0, newlen);
+						int ret = write(fd, buffer, newlen);
+						if (ret != newlen) {
+							gui_print_color("warning", "Failed to wipe crypto footer.\n");
+						} else {
+							LOGINFO("Successfully wiped crypto footer.\n");
+						}
+					}
+				}
+			}
+			close(fd);
+		}
+	} else {
+		string Command = "flash_image " + Crypto_Key_Location + " /dev/zero";
+		TWFunc::Exec_Cmd(Command);
+	}
 	if (Wipe(Fstab_File_System)) {
 		Has_Data_Media = Save_Data_Media;
 		if (Has_Data_Media && !Symlink_Mount_Point.empty()) {
@@ -1871,6 +1950,29 @@ bool TWPartition::Wipe_F2FS() {
 	} else {
 		gui_print("mkfs.f2fs binary not found, using rm -rf to wipe.\n");
 		return Wipe_RMRF();
+	}
+	return false;
+}
+
+bool TWPartition::Wipe_NTFS() {
+	string command;
+
+	if (TWFunc::Path_Exists("/sbin/mkntfs")) {
+		if (!UnMount(true))
+			return false;
+
+		gui_print("Formatting %s using mkntfs...\n", Display_Name.c_str());
+		Find_Actual_Block_Device();
+		command = "mkntfs " + Actual_Block_Device;
+		if (TWFunc::Exec_Cmd(command) == 0) {
+			Recreate_AndSec_Folder();
+			gui_print("Done.\n");
+			return true;
+		} else {
+			LOGERR("Unable to wipe '%s'.\n", Mount_Point.c_str());
+			return false;
+		}
+		return true;
 	}
 	return false;
 }

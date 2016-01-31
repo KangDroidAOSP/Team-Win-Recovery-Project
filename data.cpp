@@ -38,6 +38,7 @@
 #include <map>
 #include <fstream>
 #include <sstream>
+#include <pthread.h>
 
 #include "variables.h"
 #include "data.hpp"
@@ -65,7 +66,7 @@ extern "C"
 	void gui_notifyVarChange(const char *name, const char* value);
 }
 
-#define FILE_VERSION 0x00010001
+#define FILE_VERSION 0x00010010
 
 using namespace std;
 
@@ -76,7 +77,11 @@ int                                     DataManager::mInitialized = 0;
 
 extern bool datamedia;
 
+#ifndef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
 pthread_mutex_t DataManager::m_valuesLock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+#else
+pthread_mutex_t DataManager::m_valuesLock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+#endif
 
 // Device ID functions
 void DataManager::sanitize_device_id(char* device_id) {
@@ -882,7 +887,7 @@ void DataManager::SetDefaultValues()
 	mConstValues.insert(make_pair("tw_has_mtp", "0"));
 	mConstValues.insert(make_pair("tw_mtp_enabled", "0"));
 #endif
-	mValues.insert(make_pair("tw_mount_system_ro", make_pair("1", 1)));
+	mValues.insert(make_pair("tw_mount_system_ro", make_pair("2", 1)));
 	mValues.insert(make_pair("tw_never_show_system_ro_page", make_pair("0", 1)));
 
 #if defined(TW_HAS_LANDSCAPE) && defined(TW_DEFAULT_ROTATION)
@@ -1017,6 +1022,7 @@ int DataManager::GetMagicValue(const string varName, string& value)
 
 void DataManager::Output_Version(void)
 {
+#ifndef TW_OEM_BUILD
 	string Path;
 	char version[255];
 
@@ -1047,6 +1053,7 @@ void DataManager::Output_Version(void)
 	PartitionManager.Output_Storage_Fstab();
 	sync();
 	LOGINFO("Version number saved to '%s'\n", Path.c_str());
+#endif
 }
 
 void DataManager::ReadSettingsFile(void)

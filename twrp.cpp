@@ -24,7 +24,6 @@
 
 #include "cutils/properties.h"
 extern "C" {
-#include "minadbd/adb.h"
 #include "bootloader.h"
 }
 
@@ -45,6 +44,13 @@ extern "C" {
 #include "openrecoveryscript.hpp"
 #include "variables.h"
 #include "twrpDU.hpp"
+#ifdef TW_USE_NEW_MINADBD
+#include "adb.h"
+#else
+extern "C" {
+#include "minadbd.old/adb.h"
+}
+#endif
 
 #include "multirom.h"
 
@@ -80,7 +86,11 @@ int main(int argc, char **argv) {
 	// Handle ADB sideload
 	if (argc == 3 && strcmp(argv[1], "--adbd") == 0) {
 		property_set("ctl.stop", "adbd");
+#ifdef TW_USE_NEW_MINADBD
+		adb_main(0, DEFAULT_ADB_PORT);
+#else
 		adb_main(argv[2]);
+#endif
 		return 0;
 	}
 
@@ -366,29 +376,31 @@ int main(int argc, char **argv) {
 #endif
 #endif
 
+#ifndef TW_OEM_BUILD
 	// Check if system has never been changed
 	TWPartition* sys = PartitionManager.Find_Partition_By_Path("/system");
 	if (sys) {
-		if (DataManager::GetIntValue("tw_mount_system_ro") != 0) {
-			if (sys->Check_Lifetime_Writes() == 0) {
-				if (DataManager::GetIntValue("tw_never_show_system_ro_page") == 0) {
-					DataManager::SetValue("tw_back", "main");
-					if (gui_startPage("system_readonly", 1, 1) != 0) {
-						LOGERR("Failed to start system_readonly GUI page.\n");
-					}
+		if ((DataManager::GetIntValue("tw_mount_system_ro") == 0 && sys->Check_Lifetime_Writes() == 0) || DataManager::GetIntValue("tw_mount_system_ro") == 2) {
+			if (DataManager::GetIntValue("tw_never_show_system_ro_page") == 0) {
+				DataManager::SetValue("tw_back", "main");
+				if (gui_startPage("system_readonly", 1, 1) != 0) {
+					LOGERR("Failed to start system_readonly GUI page.\n");
 				}
-			} else {
-				DataManager::SetValue("tw_mount_system_ro", 0);
+			} else if (DataManager::GetIntValue("tw_mount_system_ro") == 0) {
 				sys->Change_Mount_Read_Only(false);
 			}
+		} else if (DataManager::GetIntValue("tw_mount_system_ro") == 1) {
+			// Do nothing, user selected to leave system read only
 		} else {
 			sys->Change_Mount_Read_Only(false);
 		}
 	}
+#endif
 
 	// Launch the main GUI
 	gui_start();
 
+#ifndef TW_OEM_BUILD
 	// Disable flashing of stock recovery
 	TWFunc::Disable_Stock_Recovery_Replace();
 	// Check for su to see if the device is rooted or not
@@ -403,6 +415,7 @@ int main(int argc, char **argv) {
 		sync();
 		PartitionManager.UnMount_By_Path("/system", false);
 	}
+#endif
 
 	// Reboot
 	TWFunc::Update_Intent_File(Reboot_Value);

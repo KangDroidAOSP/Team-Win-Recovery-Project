@@ -673,6 +673,7 @@ protected:
 		std::string displayName;
 		std::string variableValue;
 		unsigned int selected;
+		GUIAction* action;
 	};
 
 protected:
@@ -894,6 +895,7 @@ protected:
 	};
 	int ParseKey(const char* keyinfo, Key& key, int& Xindex, int keyWidth, bool longpress);
 	void LoadKeyLabels(xml_node<>* parent, int layout);
+	void DrawKey(Key& key, int keyX, int keyY, int keyW, int keyH);
 
 	enum {
 		MAX_KEYBOARD_LAYOUTS = 5,
@@ -927,7 +929,8 @@ protected:
 	std::string mVariable;
 	int currentLayout;
 	bool CapsLockOn;
-	int rowY, colX, highlightRenderCount;
+	int highlightRenderCount;
+	Key* currentKey;
 	bool hasHighlight, hasCapsHighlight;
 	COLOR mHighlightColor;
 	COLOR mCapsHighlightColor;
@@ -936,6 +939,7 @@ protected:
 	FontResource* mFont; // for main key labels
 	FontResource* mSmallFont; // for key labels like "?123"
 	FontResource* mLongpressFont; // for the small longpress label in the upper right corner
+	int longpressOffsetX, longpressOffsetY; // distance of the longpress label from the key corner
 	COLOR mLongpressFontColor;
 	COLOR mBackgroundColor; // keyboard background color
 	COLOR mKeyColorAlphanumeric; // key background color
